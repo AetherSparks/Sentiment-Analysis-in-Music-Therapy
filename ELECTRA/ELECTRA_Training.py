@@ -19,7 +19,7 @@ start_time = time.time()
 def main():
     # Load and preprocess the dataset
     print("Loading dataset...")
-    file_path = "data/therapeutic_music_enriched.csv"
+    file_path = "Original/therapeutic_music_enriched.csv"
     data = pd.read_csv(file_path)
 
     # Encode categorical target: Mood_Label
@@ -74,8 +74,8 @@ def main():
 
     # Load ELECTRA tokenizer and model
     print("Loading ELECTRA model and tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained("google/electra-base-discriminator", cache_dir="./electra_cache")
-    text_model = AutoModel.from_pretrained("google/electra-base-discriminator", cache_dir="./electra_cache").to(device)
+    tokenizer = AutoTokenizer.from_pretrained("google/electra-base-discriminator", cache_dir="./ELECTRA/electra_cache")
+    text_model = AutoModel.from_pretrained("google/electra-base-discriminator", cache_dir="./ELECTRA/electra_cache").to(device)
 
     # Combine text features into a single column
     text_data = data[text_features].apply(lambda row: ' '.join(row.values.astype(str)), axis=1).tolist()
@@ -199,7 +199,7 @@ def main():
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
-            torch.save(model.state_dict(), "electra_model.pth")  # Save model
+            torch.save(model.state_dict(), "ELECTRA/electra_model.pth")  # Save model
             print("Model saved as 'best_model.pth'.")        
         else:
             patience_counter += 1
@@ -208,7 +208,7 @@ def main():
                 break
 
     print("Training complete. Saving final model...")
-    torch.save(model.state_dict(), "electrafinal_model.pth")  # Save the final model
+    torch.save(model.state_dict(), "ELECTRA/electrafinal_model.pth")  # Save the final model
     print("Final model saved as 'electrafinal_model.pth'.")
     
     # Evaluation phase
