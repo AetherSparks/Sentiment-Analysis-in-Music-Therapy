@@ -2,29 +2,42 @@ import pandas as pd
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoTokenizer, AutoModel
+from transformers import BartTokenizer, BartForSequenceClassification
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import classification_report
 from tqdm import tqdm
 import time
-import os
+
+print(torch.cuda.is_available())
 
 # Check if GPU is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# Measure time for the entire process
-start_time = time.time()
+# Load BART tokenizer and model (use a smaller variant if needed)
+print("Loading BART model and tokenizer...")
+tokenizer = BartTokenizer.from_pretrained("facebook/bart-base", cache_dir="./BART/bart_cache")
+model = BartForSequenceClassification.from_pretrained("facebook/bart-base", num_labels=12).to(device)
 
-# Directory to save the best model
-MODEL_SAVE_PATH = "./deberta_model.pt"
-
+# Collate function to handle batching
+def collate_fn(batch):
+    input_ids = torch.stack([item['input_ids'] for item in batch])
+    attention_mask = torch.stack([item['attention_mask'] for item in batch])
+    numerical_features = torch.stack([item['numerical_features'] for item in batch])
+    labels = torch.stack([item['label'] for item in batch])
+    
+    return {
+        'input_ids': input_ids,
+        'attention_mask': attention_mask,
+        'numerical_features': numerical_features,
+        'labels': labels
+    }
 
 def main():
     # Load and preprocess the dataset
     print("Loading dataset...")
-    file_path = "data/therapeutic_music_enriched.csv"
+    file_path = "Original/therapeutic_music_enriched.csv"
     data = pd.read_csv(file_path)
 
     # Encode categorical target: Mood_Label
@@ -66,7 +79,7 @@ def main():
             encoded = self.tokenizer(
                 text,
                 truncation=True,
-                padding="max_length",
+                padding='max_length',
                 max_length=self.max_length,
                 return_tensors="pt",
             )
@@ -76,11 +89,6 @@ def main():
                 "numerical_features": torch.tensor(numerical, dtype=torch.float32),
                 "label": torch.tensor(label, dtype=torch.long),
             }
-
-    # Load DeBERTa tokenizer and model
-    print("Loading DeBERTa model and tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-base", cache_dir="./deberta_cache")
-    text_model = AutoModel.from_pretrained("microsoft/deberta-base", cache_dir="./deberta_cache").to(device)
 
     # Combine text features into a single column
     text_data = data[text_features].apply(lambda row: ' '.join(row.values.astype(str)), axis=1).tolist()
@@ -92,40 +100,18 @@ def main():
         text_data, numerical_data, labels, test_size=0.2, random_state=42
     )
 
-    # Create PyTorch datasets and dataloaders
-    batch_size = 32
+    # Create PyTorch datasets
     train_dataset = MusicDataset(X_text_train, X_num_train, y_train, tokenizer)
     test_dataset = MusicDataset(X_text_test, X_num_test, y_test, tokenizer)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size)
+    # Create DataLoader with collate function
+    batch_size = 64  # Increased batch size
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn)
 
-    # Neural network with Dropout
-    class CombinedModel(torch.nn.Module):
-        def __init__(self, text_model, numerical_input_dim, output_dim):
-            super(CombinedModel, self).__init__()
-            self.text_model = text_model
-            self.fc_text = torch.nn.Linear(text_model.config.hidden_size, 128)
-            self.dropout = torch.nn.Dropout(0.5)
-            self.fc_num = torch.nn.Linear(numerical_input_dim, 64)
-            self.fc_combined = torch.nn.Linear(128 + 64, output_dim)
-
-        def forward(self, input_ids, attention_mask, numerical_features):
-            text_outputs = self.text_model(input_ids=input_ids, attention_mask=attention_mask)
-            text_embedding = text_outputs.last_hidden_state[:, 0, :]  # [CLS] token embedding
-            text_features = torch.relu(self.fc_text(text_embedding))
-            text_features = self.dropout(text_features)
-
-            numerical_features = torch.relu(self.fc_num(numerical_features))
-            combined = torch.cat((text_features, numerical_features), dim=1)
-            output = self.fc_combined(combined)
-            return output
-
-    model = CombinedModel(text_model, numerical_data.shape[1], len(label_encoder.classes_)).to(device)
-
-    # Define optimizer and loss function with L2 regularization
+    # Define optimizer and loss function
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5, weight_decay=1e-5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
     # Early stopping parameters
     patience = 5
@@ -134,69 +120,84 @@ def main():
 
     # Training loop
     print("Starting training...")
-    num_epochs = 25
+    num_epochs = 10  # Reduced epochs
     for epoch in range(num_epochs):
         model.train()
         epoch_loss = 0
         correct = 0
         total = 0
+        start_epoch = time.time()
 
         for batch in tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{num_epochs}", unit="batch"):
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
             numerical_features = batch['numerical_features'].to(device)
-            labels = batch['label'].to(device)
+            labels = batch['labels'].to(device)
 
             optimizer.zero_grad()
-            outputs = model(input_ids, attention_mask, numerical_features)
-            loss = criterion(outputs, labels)
+            outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+            loss = outputs.loss
             loss.backward()
             optimizer.step()
 
             epoch_loss += loss.item()
-            _, predicted = outputs.max(1)
             total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
+            correct += (outputs.logits.argmax(dim=1) == labels).sum().item()
 
+        # Calculate training accuracy
         accuracy = 100. * correct / total
-        print(f"Epoch {epoch + 1}: Loss={epoch_loss:.4f}, Accuracy={accuracy:.2f}%")
+        epoch_time = time.time() - start_epoch
+        print(f"Training Epoch {epoch + 1} finished: Loss: {epoch_loss:.4f}, Accuracy: {accuracy:.2f}%, Time: {epoch_time:.2f}s")
 
-        # Validation
+        # Validation step
         model.eval()
         val_loss = 0
         val_correct = 0
         val_total = 0
+        y_pred = []
+        y_true = []
+
         with torch.no_grad():
-            for batch in test_loader:
+            for batch in tqdm(test_loader, desc="Validating", unit="batch"):
                 input_ids = batch['input_ids'].to(device)
                 attention_mask = batch['attention_mask'].to(device)
                 numerical_features = batch['numerical_features'].to(device)
-                labels = batch['label'].to(device)
+                labels = batch['labels'].to(device)
 
-                outputs = model(input_ids, attention_mask, numerical_features)
-                loss = criterion(outputs, labels)
-                val_loss += loss.item()
-
-                _, predicted = outputs.max(1)
+                outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+                val_loss += outputs.loss.item()
+                val_correct += (outputs.logits.argmax(dim=1) == labels).sum().item()
                 val_total += labels.size(0)
-                val_correct += predicted.eq(labels).sum().item()
 
+                # Store predictions and true labels for metrics
+                y_pred.extend(outputs.logits.argmax(dim=1).cpu().numpy())
+                y_true.extend(labels.cpu().numpy())
+
+        # Calculate validation accuracy
         val_accuracy = 100. * val_correct / val_total
-        print(f"Validation Loss: {val_loss:.4f}, Accuracy: {val_accuracy:.2f}%")
+        print(f"Validation: Loss: {val_loss:.4f}, Accuracy: {val_accuracy:.2f}%")
+        
+        # Print classification report
+        # Print classification report
+        unique_labels = np.unique(y_true)
+        print("Classification Report:")
+        print(classification_report(y_true, y_pred, target_names=label_encoder.classes_, labels=unique_labels))
 
-        # Early stopping
+
+        # Early stopping check
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
+            print("Validation loss improved, saving model...")
+            model.save_pretrained("best_model")
+            tokenizer.save_pretrained("best_model")
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                print("Early stopping.")
+                print("Early stopping triggered.")
                 break
 
-    print("Training completed!")
-
+    print("Training complete.")
 
 if __name__ == "__main__":
     main()
