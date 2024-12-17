@@ -1,97 +1,140 @@
 import os
 import pandas as pd
+import numpy as np
 import lightgbm as lgb
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.metrics import root_mean_squared_error
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from tqdm import tqdm
+import time
 import joblib
 
-# Define paths
-base_dir = os.path.dirname(os.path.abspath(__file__))  # Directory where LGBM_Training.py is located
-input_file = os.path.join(base_dir, "../Original/hindi_songs_with_audio.csv")  # Input file path
-output_folder = base_dir  # Use the same directory as LGBM_Training.py for outputs
+def main():
+    # Check for GPU availability
+    print("Checking GPU availability...")
+    device_type = "cuda" if "gpu" in lgb.__dict__ else "cpu"
+    print(f"Using device: {device_type}")
 
-# Load dataset
-df = pd.read_csv(input_file)
+    # Load and preprocess the dataset
+    print("Loading dataset...")
+    file_path = "Original/therapeutic_music_enriched.csv"
+    data = pd.read_csv(file_path)
 
-# Select features
-numeric_features = [
-    'Artist Popularity', 'Danceability', 'Energy', 'Loudness', 
-    'Speechiness', 'Acousticness', 'Instrumentalness', 
-    'Liveness', 'Valence', 'Tempo', 'Duration (ms)'
-]
-categorical_features = ['Key', 'Mode', 'Artist Genres']  # Modify based on your dataset
+    # Encode categorical target: Mood_Label
+    print("Encoding target labels...")
+    label_encoder = LabelEncoder()
+    data['Mood_Label'] = label_encoder.fit_transform(data['Mood_Label'])
 
-# Target variable
-target = 'Track Popularity'  # Change to your target variable
-
-# Preprocessing: Handle missing values
-# Fill numeric columns with their median
-df[numeric_features] = df[numeric_features].fillna(df[numeric_features].median())
-
-# Fill categorical columns with "Unknown"
-df[categorical_features] = df[categorical_features].fillna("Unknown")
-
-# Save the processed dataset
-processed_csv_path = os.path.join(output_folder, "processed_hindi_songs.csv")
-df.to_csv(processed_csv_path, index=False)
-
-# Train-test split
-X = df[numeric_features + categorical_features]
-y = df[target]
-
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# Preprocessing: Normalize numeric and encode categorical features
-preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', StandardScaler(), numeric_features),
-        ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+    # Separate features
+    text_features = ['Track Name', 'Artist Name', 'Artist Genres', 'Album']
+    numerical_features = [
+        'Track Popularity', 'Danceability', 'Energy', 'Key', 'Loudness', 
+        'Mode', 'Speechiness', 'Acousticness', 'Instrumentalness', 'Liveness', 
+        'Valence', 'Tempo', 'Duration (ms)'
     ]
-)
 
-X_train = preprocessor.fit_transform(X_train)
-X_val = preprocessor.transform(X_val)
+    # Preprocess numerical features
+    print("Scaling numerical features...")
+    scaler = StandardScaler()
+    data[numerical_features] = scaler.fit_transform(data[numerical_features])
 
-# Create LightGBM dataset
-train_data = lgb.Dataset(X_train, label=y_train)
-val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
+    # Combine text features into a single column (optional for future use)
+    data['Combined_Text'] = data[text_features].apply(lambda row: ' '.join(row.values.astype(str)), axis=1)
 
-# LightGBM parameters
-params = {
-    'objective': 'regression',  # Use 'multiclass' if classification
-    'metric': 'rmse',  # Use 'multi_logloss' for classification
-    'boosting_type': 'gbdt',  # Gradient Boosting Decision Trees
-    'num_leaves': 31,  # Controls the complexity of the tree
-    'learning_rate': 0.05,
-    'feature_fraction': 0.9,  # Controls overfitting
-    'early_stopping_round': 50  # Early stopping rounds for the validation set
-}
+    # Features and target
+    X = data[numerical_features]  # Use numerical features only
+    y = data['Mood_Label']
 
-# Train model
-model = lgb.train(
-    params,
-    train_data,
-    valid_sets=[train_data, val_data],
-    num_boost_round=1000,
-)
+    # Train-test split
+    print("Splitting data into train and test sets...")
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-# Predict on validation set
-y_pred = model.predict(X_val)
+    # Create LightGBM datasets
+    train_data = lgb.Dataset(X_train, label=y_train, weight=None, free_raw_data=False)
+    val_data = lgb.Dataset(X_val, label=y_val, weight=None, free_raw_data=False, reference=train_data)
 
-# Calculate RMSE
-rmse = root_mean_squared_error(y_val, y_pred)
-print(f"Root Mean Squared Error (RMSE): {rmse}")
+    # Define LightGBM parameters
+    params = {
+        'objective': 'multiclass',
+        'metric': 'multi_logloss',
+        'num_class': len(np.unique(y)),  # Automatically set based on target labels
+        'boosting_type': 'gbdt',
+        'num_leaves': 31,
+        'learning_rate': 0.05,
+        'feature_fraction': 0.9,
+        'max_depth': 7,
+        'verbose': -1  # Suppress LightGBM internal logs
+    }
 
-# Save model in binary format
-model_path = os.path.join(output_folder, "LGBM_Model.bin")
-model.save_model(model_path)
+    # Early stopping parameters
+    patience = 5
+    best_val_loss = float('inf')
+    patience_counter = 0
 
-# Save the preprocessor for reuse
-preprocessor_path = os.path.join(output_folder, "preprocessor.pkl")
-joblib.dump(preprocessor, preprocessor_path)
+    # Training Loop
+    print("Starting LightGBM training...")
+    num_epochs = 1000  # Max boosting rounds
+    start_time = time.time()
 
-print(f"Processed CSV saved to: {processed_csv_path}")
-print(f"Model saved to: {model_path}")
-print(f"Preprocessor saved to: {preprocessor_path}")
+    model = None
+    for epoch in tqdm(range(1, num_epochs + 1), desc="Training LightGBM", unit="round"):
+        model = lgb.train(
+            params,
+            train_data,
+            valid_sets=[train_data, val_data],
+            num_boost_round=1,
+            init_model=model,
+            keep_training_booster=True
+        )
+
+        # Calculate validation loss
+        val_loss = model.best_score['valid_1']['multi_logloss']
+
+        # Early stopping logic
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            print(f"Validation loss improved at epoch {epoch}. Saving model...")
+            model.save_model("LGBM/best_lgbm_model.txt")
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print("Early stopping triggered.")
+                break
+
+    end_time = time.time()
+    print(f"Training complete in {end_time - start_time:.2f} seconds.")
+
+
+    # Predict on validation set
+    print("Evaluating the model...")
+    y_pred = np.argmax(model.predict(X_val), axis=1)
+
+    # Calculate metrics
+    accuracy = accuracy_score(y_val, y_pred)
+    precision = precision_score(y_val, y_pred, average='weighted')
+    recall = recall_score(y_val, y_pred, average='weighted')
+    f1 = f1_score(y_val, y_pred, average='weighted')
+
+    print("\nClassification Metrics:")
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+    # Get unique labels from LabelEncoder and y_true
+    unique_labels = np.unique(np.concatenate([y_val, y_pred]))  # Combine to ensure no missing classes
+
+    # Generate the classification report
+    print("\nClassification Report:")
+    print(classification_report(y_val, y_pred, target_names=label_encoder.classes_, labels=unique_labels))
+
+
+    # Save the model, scaler, and encoder
+    print("Saving model and preprocessing objects...")
+    joblib.dump(scaler, "LGBM/lgbm_scaler.pkl")
+    joblib.dump(label_encoder, "LGBM/lgbm_label_encoder.pkl")
+
+    print("Model training and evaluation complete.")
+
+if __name__ == "__main__":
+    main()
