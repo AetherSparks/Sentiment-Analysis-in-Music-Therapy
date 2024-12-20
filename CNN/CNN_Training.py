@@ -9,9 +9,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 from tqdm import tqdm
-import time
 import joblib
-
 
 # Check for GPU availability
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
