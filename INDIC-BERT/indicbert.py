@@ -75,8 +75,8 @@ def main():
 
     # Load IndicBERT tokenizer and model
     print("Loading IndicBERT model and tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained("ai4bharat/indic-bert", cache_dir="./indicbert_cache")
-    text_model = AutoModel.from_pretrained("ai4bharat/indic-bert", cache_dir="./indicbert_cache").to(device)
+    tokenizer = AutoTokenizer.from_pretrained("ai4bharat/indic-bert", cache_dir="./INDIC-BERT/indicbert_cache")
+    text_model = AutoModel.from_pretrained("ai4bharat/indic-bert", cache_dir="./INDIC-BERT/indicbert_cache").to(device)
 
     # Combine text features into a single column
     text_data = data[text_features].apply(lambda row: ' '.join(row.values.astype(str)), axis=1).tolist()
@@ -201,7 +201,7 @@ def main():
             best_val_loss = val_loss
             patience_counter = 0
             # Save the best model
-            torch.save(model.state_dict(), "indicbert_model.pth")
+            torch.save(model.state_dict(), "INDIC-BERT/indicbert_model.pth")
             print("Best model saved.")
         else:
             patience_counter += 1
@@ -210,7 +210,7 @@ def main():
                 break
 
     # Load the best model for evaluation
-    model.load_state_dict(torch.load("indicbert_model.pth"))
+    model.load_state_dict(torch.load("INDIC-BERT/indicbert_model.pth"))
     model.eval()
 
     # Evaluation phase

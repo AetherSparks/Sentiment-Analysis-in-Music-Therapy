@@ -196,6 +196,8 @@ def main():
             if patience_counter >= patience:
                 print("Early stopping triggered.")
                 break
+    print("Classification Report:")
+    print(classification_report(y_true, y_pred, target_names=label_encoder.classes_, labels=unique_labels))
 
     print("Training complete.")
 
