@@ -1,13 +1,14 @@
 # Sentiment Analysis in Music Therapy
 
-This project focuses on using machine learning models to predict user moods based on audio and metadata from songs. By leveraging features like track popularity, danceability, energy, and more, the project aims to classify songs into mood categories for use in music therapy.
+This project focuses on using machine learning models to predict user moods based on audio and metadata from songs. 
+By leveraging features like track popularity, danceability, energy, and more, the project aims to classify songs into mood categories for use in music therapy.
 
 ## **Project Structure**
 
 ### **Directories**
 
 - `Original/`
-  - Contains the raw dataset (`therapeutic_music_enriched.csv`).
+  - Contains the raw dataset (`therapeutic_music_enriched.csv`) along with other versions of the dataset, including Y.M.I.R(Yielding Melodies for Internal Restoration) Dataset.
 
 - `XGBoost/`
   - Contains the XGBoost model and associated files (e.g., `xgboost_model.json`).
@@ -46,6 +47,7 @@ This project focuses on using machine learning models to predict user moods base
   - Contains the script for ensemble learning using majority voting.
 
 ### **Scripts**
+As it is not possible to save the Trained Models in the Repository and upload it to Github due to their large sizes, we have instead uploaded their Training Scripts. Just run the given Files to obtain the trained models along with their corresponding accuracy, f1 score, etc.
 
 1. `XGBoost/XGBoost_Training.py`
    - Script to train and save the XGBoost model.
@@ -56,7 +58,7 @@ This project focuses on using machine learning models to predict user moods base
 3. `CatBoost/CatBoost_Training.py`
    - Script to train and save the CatBoost model.
 
-4. `Random-Forest/RandomForest_Training.py`
+4. `Random-Forest/Random-Forest_Training.py`
    - Script to train and save the Random Forest model.
 
 5. `CNN/CNN_Training.py`
@@ -74,20 +76,20 @@ This project focuses on using machine learning models to predict user moods base
 9. `ELECTRA/ELECTRA_Training.py`
    - Script to train and save the ELECTRA model.
 
-10. `INDIC-BERT/IndicBERT_Training.py`
+10. `INDIC-BERT/INDIC-BERT_Training.py`
     - Script to train and save the Indic-BERT model.
 
 11. `Naive-Bayes/NaiveBayes_Training.py`
     - Script to train and save the Naive Bayes classifier.
 
 12. `Ensemble-Voting/Ensemble-Voting.py`
-    - Script to combine predictions from XGBoost, LightGBM, CatBoost, Random Forest, and CNN using majority voting.
+    - Script to combine predictions from XGBoost, LightGBM, CatBoost, Random Forest, and CNN using majority voting. To run this you must first train the given 5 models.
 
 ## **Installation**
 
 ### **1. Clone the Repository**
 ```bash
-$ git clone <repository_url>
+$ git clone https://github.com/AetherSparks/Sentiment-Analysis-in-Music-Therapy.git
 $ cd Sentiment-Analysis-in-Music-Therapy
 ```
 
@@ -191,15 +193,9 @@ The following accuracies were achieved during testing:
 | ELECTRA          | 0.45     |
 | Indic-BERT       | 0.46     |
 | Naive Bayes      | 0.40     |
-| **Ensemble**     | **0.98** |
+| **Ensemble**     | **0.965**|
 
-## **Contributing**
-
-Feel free to fork the repository and submit pull requests to improve the project.
-
-## **License**
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+An In Depth Score of these models have been saved in the `Results` Directory.
 
 
 
