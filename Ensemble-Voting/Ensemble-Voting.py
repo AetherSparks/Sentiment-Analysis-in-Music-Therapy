@@ -127,8 +127,47 @@ print(f"Number of classes in label_encoder: {len(label_encoder.classes_)}")
 # Evaluate the ensemble
 print("Evaluating ensemble model...")
 accuracy = accuracy_score(y_test, final_preds)
-print(f"Ensemble Accuracy: {accuracy:.4f}")
-print("\nClassification Report:")
+print(f"Hard Voting Ensemble Accuracy: {accuracy:.4f}")
+print("\nClassification Report for Hard Voting Ensemble:")
 
 # Use the unique classes from the test set to ensure the correct labels are passed to classification_report
+print(classification_report(y_test, final_preds, target_names=label_encoder.classes_[unique_classes_in_test], zero_division=0))
+
+def predict_cnn_probs(model, X_test):
+    """
+    Generate probability predictions using the CNN model.
+
+    Args:
+        model (torch.nn.Module): Trained CNN model.
+        X_test (np.ndarray): Test dataset features.
+
+    Returns:
+        np.ndarray: Predicted probabilities for each class.
+    """
+    model_device = next(model.parameters()).device  # Get the device of the model
+    X_tensor = torch.tensor(X_test, dtype=torch.float32).to(model_device)  # Convert input to a tensor and move to the model's device
+    model.eval()  # Set model to evaluation mode
+    with torch.no_grad():
+        outputs = model(X_tensor)  # Forward pass
+        probs = torch.nn.functional.softmax(outputs, dim=1)  # Apply softmax to get probabilities
+    return probs.cpu().numpy()  # Convert to NumPy array and return
+
+
+
+xgb_probs = xgb_model.predict_proba(X_test)
+lgb_probs = lgb_model.predict(X_test)  # LightGBM outputs probabilities
+catboost_probs = catboost_model.predict_proba(X_test)
+rf_probs = rf_model.predict_proba(X_test)
+cnn_probs = predict_cnn_probs(cnn_model, X_test)  # Define a function for CNN probabilities
+
+ensemble_probs = (xgb_probs + lgb_probs + catboost_probs + rf_probs + cnn_probs) / 5
+final_preds = np.argmax(ensemble_probs, axis=1)
+
+
+# Compute Accuracy
+accuracy = accuracy_score(y_test, final_preds)
+print(f"Soft Voting Ensemble Accuracy: {accuracy:.4f}")
+
+# Compute Classification Report
+print("\nClassification Report for Soft Voting Ensemble:")
 print(classification_report(y_test, final_preds, target_names=label_encoder.classes_[unique_classes_in_test], zero_division=0))
